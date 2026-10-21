@@ -48,6 +48,9 @@ export interface Controls {
   queueOrder: QueueOrder;
   /** Overrides workload.arrivalRate when set (the Level 2 utilization dial). */
   arrivalRate?: number;
+  /** Send a copy of an order still cooking hedgeMs after it arrived. First finisher wins. */
+  hedge: boolean;
+  hedgeMs: number;
 }
 
 export interface TicketView {
@@ -57,6 +60,8 @@ export interface TicketView {
   arrivedAt: number;
   /** When this ticket joined the queue. */
   enqueuedAt: number;
+  /** A hedge copy rather than the original. */
+  hedge: boolean;
 }
 
 export interface CookView {
@@ -85,6 +90,8 @@ export interface Totals {
   arrived: number;
   completed: number;
   dropped: number;
+  /** Hedge copies issued. */
+  hedges: number;
   /** Integral of queue length over time (order·ms). */
   queueLenMs: number;
   /** Sum and count of time tickets waited in the queue before a cook took them. */

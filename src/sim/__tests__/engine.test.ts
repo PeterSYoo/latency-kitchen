@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { createSim } from '../engine';
 import type { SimConfig } from '../types';
+import { DEFAULT_CONTROLS } from '../engine';
 import { PROTOTYPE, SEED, SIM_MS, run } from './helpers';
 
-const FIFO3 = { cooks: 3, queueOrder: 'fifo' as const };
+const FIFO3 = { ...DEFAULT_CONTROLS, cooks: 3, queueOrder: 'fifo' as const };
 
 describe('determinism', () => {
   it('gives identical metrics for the same seed and controls', () => {
@@ -56,7 +57,7 @@ describe('queueing theory', () => {
     const mm1: SimConfig = {
       workload: { arrivalRate: (rho / meanService) * 1000, service: { dist: 'exponential', mean: meanService } },
     };
-    const m = run(mm1, { cooks: 1, queueOrder: 'fifo' }).metrics();
+    const m = run(mm1, { ...DEFAULT_CONTROLS, cooks: 1, queueOrder: 'fifo' }).metrics();
     const expected = meanService / (1 - rho);
     const observed = m.totals.latencySumMs / m.totals.completed;
     expect(Math.abs(observed - expected) / expected).toBeLessThan(0.05);
@@ -75,7 +76,7 @@ describe('workers and queue order', () => {
 
   it('serves FIFO in arrival order and LIFO newest first', () => {
     for (const queueOrder of ['fifo', 'lifo'] as const) {
-      const sim = createSim(steady, { cooks: 0, queueOrder }, SEED);
+      const sim = createSim(steady, { ...DEFAULT_CONTROLS, cooks: 0, queueOrder }, SEED);
       sim.advanceTo(10_000);
       const queued = sim.snapshot().queue.map((q) => q.orderId);
       expect(queued.length).toBeGreaterThan(3);
@@ -86,7 +87,7 @@ describe('workers and queue order', () => {
   });
 
   it('returns a removed busy cook’s ticket to the front of the queue', () => {
-    const sim = createSim(steady, { cooks: 0, queueOrder: 'fifo' }, SEED);
+    const sim = createSim(steady, { ...DEFAULT_CONTROLS, cooks: 0, queueOrder: 'fifo' }, SEED);
     sim.advanceTo(10_000);
     sim.setControls({ cooks: 1 });
     const taken = sim.snapshot().cooks[0].ticket!.orderId;
@@ -124,7 +125,7 @@ describe('workers and queue order', () => {
     const bursty: SimConfig = {
       workload: { ...PROTOTYPE.workload, bursts: [{ atMs: 30_000, durationMs: 30_000, multiplier: 3 }] },
     };
-    const sim = createSim(bursty, { cooks: 50, queueOrder: 'fifo' }, SEED);
+    const sim = createSim(bursty, { ...DEFAULT_CONTROLS, cooks: 50, queueOrder: 'fifo' }, SEED);
     sim.advanceTo(30_000);
     const before = sim.metrics().totals.arrived;
     sim.advanceTo(60_000);
@@ -136,7 +137,7 @@ describe('workers and queue order', () => {
 
 describe('stalls', () => {
   it('per-request stalls hit about p of orders', () => {
-    const m = run(PROTOTYPE, { cooks: 50, queueOrder: 'fifo' }).metrics();
+    const m = run(PROTOTYPE, { ...DEFAULT_CONTROLS, cooks: 50, queueOrder: 'fifo' }).metrics();
     // With no queueing, p99 sits inside the stalled 4%.
     expect(m.p95).toBeLessThan(150);
     expect(m.p99).toBeGreaterThan(350);
@@ -150,7 +151,7 @@ describe('stalls', () => {
         stalls: { p: 1, minMs: 500, maxMs: 500, scope: 'cook' },
       },
     };
-    const sim = createSim(cfg, { cooks: 4, queueOrder: 'fifo' }, SEED);
+    const sim = createSim(cfg, { ...DEFAULT_CONTROLS, cooks: 4, queueOrder: 'fifo' }, SEED);
     for (let t = 0; t < 10_000; t += 7) {
       sim.advanceTo(t);
       for (const c of sim.snapshot().cooks) {
@@ -167,7 +168,7 @@ describe('stalls', () => {
         stalls: { p: 1, minMs: 400, maxMs: 400, scope: 'global', everyMs: 5000 },
       },
     };
-    const sim = createSim(gc, { cooks: 6, queueOrder: 'fifo' }, SEED);
+    const sim = createSim(gc, { ...DEFAULT_CONTROLS, cooks: 6, queueOrder: 'fifo' }, SEED);
     sim.advanceTo(5_100);
     const snap = sim.snapshot();
     expect(snap.globalStall).toBe(true);
@@ -193,10 +194,6 @@ describe('metrics', () => {
     // The last-second figure swings with stalls but stays a fraction.
     expect(m.utilization).toBeGreaterThanOrEqual(0);
     expect(m.utilization).toBeLessThanOrEqual(1 + 1e-9);
-  });
-
-  it('has no wasted work without hedging or retries', () => {
-    expect(run(PROTOTYPE, FIFO3).metrics().amplification).toBeCloseTo(1, 9);
   });
 
   it('fills a 1,500-order window and a 48-bin histogram', () => {

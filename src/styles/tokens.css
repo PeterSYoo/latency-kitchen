@@ -1,0 +1,66 @@
+/* One token set for light and dark. Series colours are fixed everywhere:
+   p50 grey, p95 teal, p99 amber. Red only for breaches and stalls, green only
+   for passing, blue for controls and normal bars. */
+:root {
+  color-scheme: light;
+  --bg: #f3f4f6;
+  --surface: #ffffff;
+  --sunken: #f6f7f9;
+  --line: #e2e5ea;
+  --ink: #121821;
+  --muted: #5d6775;
+  --faint: #8a93a0;
+  --accent: #2f6bd8;
+  --series: #4c7fd9;
+  --p50: #8a94a3;
+  --p95: #1f8f8a;
+  --p99: #c96a00;
+  --ok: #178a4c;
+  --crit: #d2353a;
+  --crit-tint: rgba(210, 53, 58, 0.07);
+  --ok-tint: rgba(23, 138, 76, 0.1);
+  --font-ui: 'Geist Variable', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'Geist Mono Variable', ui-monospace, 'SF Mono', Menlo, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    color-scheme: dark;
+    --bg: #0f1216;
+    --surface: #161a20;
+    --sunken: #1b2028;
+    --line: #272d36;
+    --ink: #e7eaee;
+    --muted: #9aa4b1;
+    --faint: #6b7480;
+    --accent: #6c9cf0;
+    --series: #5a8de6;
+    --p50: #7d8796;
+    --p95: #3fbdb6;
+    --p99: #f0a236;
+    --ok: #3fbf78;
+    --crit: #f0565a;
+    --crit-tint: rgba(240, 86, 90, 0.1);
+    --ok-tint: rgba(63, 191, 120, 0.12);
+  }
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: #0f1216;
+  --surface: #161a20;
+  --sunken: #1b2028;
+  --line: #272d36;
+  --ink: #e7eaee;
+  --muted: #9aa4b1;
+  --faint: #6b7480;
+  --accent: #6c9cf0;
+  --series: #5a8de6;
+  --p50: #7d8796;
+  --p95: #3fbdb6;
+  --p99: #f0a236;
+  --ok: #3fbf78;
+  --crit: #f0565a;
+  --crit-tint: rgba(240, 86, 90, 0.1);
+  --ok-tint: rgba(63, 191, 120, 0.12);
+}
