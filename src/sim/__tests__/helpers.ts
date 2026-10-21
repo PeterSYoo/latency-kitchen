@@ -4,7 +4,7 @@ import type { Controls, SimConfig } from '../types';
 export const SIM_MS = 90_000;
 export const SEED = 42;
 
-/** Level 1 workload from the reference prototype. */
+/** Level 1 workload from the reference prototype (kept here so engine tests don't depend on level tuning). */
 export const PROTOTYPE: SimConfig = {
   workload: {
     arrivalRate: 30,

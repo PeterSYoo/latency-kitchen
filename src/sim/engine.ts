@@ -22,14 +22,11 @@ const DEFAULT_GLOBAL_STALL_EVERY_MS = 5000;
 interface Order {
   id: number;
   arrivedAt: number;
-  /** Cooking time before any stall. */
-  baseMs: number;
-  /** Stall drawn at arrival; applied according to the stall scope. */
-  stallMs: number;
-  /** Cook-ms spent on this order so far. */
+  /** Cook-ms spent on this order so far, every ticket included. */
   workMs: number;
-  /** Cost of the first ticket as started; the no-hedge, no-retry baseline. */
-  firstCostMs: number;
+  started: boolean;
+  hedged: boolean;
+  hedgeToken: number;
   done: boolean;
 }
 
@@ -37,6 +34,11 @@ interface Ticket {
   id: number;
   order: Order;
   enqueuedAt: number;
+  hedge: boolean;
+  /** Cooking time before any stall. */
+  baseMs: number;
+  /** Stall drawn with the ticket; applied according to the stall scope. */
+  stallMs: number;
 }
 
 interface Cook {
@@ -53,7 +55,14 @@ interface Cook {
   token: number;
 }
 
-type EventKind = 'arrival' | 'serviceDone' | 'stallStart' | 'stallEnd' | 'rateChange' | 'metricsTick';
+type EventKind =
+  | 'arrival'
+  | 'serviceDone'
+  | 'hedgeTimer'
+  | 'stallStart'
+  | 'stallEnd'
+  | 'rateChange'
+  | 'metricsTick';
 
 interface SimEvent {
   t: number;
@@ -62,7 +71,15 @@ interface SimEvent {
   /** Lazy cancellation: an event whose token no longer matches its owner is skipped. */
   token: number;
   cookId: number;
+  order: Order | null;
 }
+
+export const DEFAULT_CONTROLS: Controls = {
+  cooks: 3,
+  queueOrder: 'fifo',
+  hedge: false,
+  hedgeMs: 120,
+};
 
 export function createSim(config: SimConfig, initial: Controls, seed: number): Sim {
   return new Engine(config, initial, seed);
@@ -76,9 +93,11 @@ class Engine implements Sim {
   private readonly heap = new EventHeap<SimEvent>();
   private seq = 0;
 
-  private readonly rng: { arrivals: Rng; service: Rng; stalls: Rng; globalStalls: Rng };
+  private readonly rng: { arrivals: Rng; service: Rng; stalls: Rng; hedge: Rng; globalStalls: Rng };
 
   private queue: Ticket[] = [];
+  /** Hedge copies wait here and go before the normal queue. */
+  private hedgeQueue: Ticket[] = [];
   private cooks: Cook[] = [];
   private globalStall = false;
   private nextOrderId = 1;
@@ -96,6 +115,7 @@ class Engine implements Sim {
     arrived: 0,
     completed: 0,
     dropped: 0,
+    hedges: 0,
     queueLenMs: 0,
     waitSumMs: 0,
     waitCount: 0,
@@ -118,6 +138,7 @@ class Engine implements Sim {
       arrivals: stream(seed, 'arrivals'),
       service: stream(seed, 'service'),
       stalls: stream(seed, 'stalls'),
+      hedge: stream(seed, 'hedge'),
       globalStalls: stream(seed, 'global-stalls'),
     };
 
@@ -166,6 +187,9 @@ class Engine implements Sim {
     if ('arrivalRate' in patch && patch.arrivalRate !== prev.arrivalRate) {
       this.rateChanged();
     }
+    if (this.ctl.hedge && (!prev.hedge || this.ctl.hedgeMs !== prev.hedgeMs)) {
+      for (const order of this.ordersInFlight()) this.armHedge(order);
+    }
     this.dispatch();
   }
 
@@ -176,7 +200,7 @@ class Engine implements Sim {
   snapshot(): SimSnapshot {
     return {
       t: this.now,
-      queue: this.queue.map((tk) => this.ticketView(tk)),
+      queue: [...this.hedgeQueue, ...this.queue].map((tk) => this.ticketView(tk)),
       cooks: this.cooks.map((c) => this.cookView(c)),
       globalStall: this.globalStall,
     };
@@ -193,7 +217,7 @@ class Engine implements Sim {
       t: this.now,
       ...s,
       utilization,
-      queueLength: this.queue.length,
+      queueLength: this.queue.length + this.hedgeQueue.length,
       busyCooks: this.busyCount(),
       cooks: this.cooks.length,
       totals: { ...this.totals },
@@ -212,6 +236,9 @@ class Engine implements Sim {
         if (cook && cook.ticket && cook.token === e.token) this.onServiceDone(cook);
         break;
       }
+      case 'hedgeTimer':
+        if (e.order && e.order.hedgeToken === e.token) this.onHedgeTimer(e.order);
+        break;
       case 'stallStart':
         this.onStallStart();
         break;
@@ -232,13 +259,13 @@ class Engine implements Sim {
     const order: Order = {
       id: this.nextOrderId++,
       arrivedAt: this.now,
-      baseMs: this.drawService(),
-      stallMs: this.drawStall(),
       workMs: 0,
-      firstCostMs: -1,
+      started: false,
+      hedged: false,
+      hedgeToken: 0,
       done: false,
     };
-    this.queue.push({ id: this.nextTicketId++, order, enqueuedAt: this.now });
+    this.queue.push(this.newTicket(order, false, this.rng.service, this.rng.stalls));
     this.dispatch();
 
     this.arrivalRemaining = exponential(this.rng.arrivals, 1);
@@ -247,17 +274,33 @@ class Engine implements Sim {
   }
 
   private onServiceDone(cook: Cook): void {
-    const ticket = cook.ticket!;
-    const order = ticket.order;
-    order.workMs += this.activeMs(cook);
+    const order = cook.ticket!.order;
+    // The winning ticket's work is the no-hedge, no-retry baseline; anything
+    // else spent on the order is waste.
+    const usefulMs = this.activeMs(cook);
+    order.workMs += usefulMs;
     cook.ticket = null;
     if (!order.done) {
       order.done = true;
+      this.cancelTwins(order);
       const latency = this.now - order.arrivedAt;
       this.totals.completed++;
       this.totals.latencySumMs += latency;
-      this.outcomes.push({ ok: true, latencyMs: latency, workMs: order.workMs, baseMs: order.firstCostMs });
+      this.outcomes.push({ ok: true, latencyMs: latency, workMs: order.workMs, baseMs: usefulMs });
     }
+    this.dispatch();
+  }
+
+  private onHedgeTimer(order: Order): void {
+    if (order.done || order.hedged || !this.ctl.hedge) return;
+    const due = order.arrivedAt + this.ctl.hedgeMs;
+    if (this.now < due) {
+      this.armHedge(order);
+      return;
+    }
+    order.hedged = true;
+    this.totals.hedges++;
+    this.hedgeQueue.push(this.newTicket(order, true, this.rng.hedge, this.rng.hedge));
     this.dispatch();
   }
 
@@ -299,14 +342,55 @@ class Engine implements Sim {
     this.push(this.now + METRICS_TICK_MS, 'metricsTick');
   }
 
+  // ---- hedging ------------------------------------------------------------
+
+  /** A hedge fires hedgeMs after arrival, or as soon as the order starts if that's later. */
+  private armHedge(order: Order): void {
+    if (!this.ctl.hedge || order.hedged || order.done || !order.started) return;
+    order.hedgeToken++;
+    const at = Math.max(this.now, order.arrivedAt + this.ctl.hedgeMs);
+    this.heap.push({ t: at, seq: this.seq++, kind: 'hedgeTimer', token: order.hedgeToken, cookId: -1, order });
+  }
+
+  /** The first ticket to finish wins; every other ticket for the order stops at once. */
+  private cancelTwins(order: Order): void {
+    for (const c of this.cooks) {
+      if (c.ticket?.order !== order) continue;
+      order.workMs += this.activeMs(c);
+      c.ticket = null;
+      c.token++;
+    }
+    this.hedgeQueue = this.hedgeQueue.filter((tk) => tk.order !== order);
+    this.queue = this.queue.filter((tk) => tk.order !== order);
+  }
+
+  private ordersInFlight(): Set<Order> {
+    const orders = new Set<Order>();
+    for (const c of this.cooks) if (c.ticket) orders.add(c.ticket.order);
+    for (const tk of this.queue) if (tk.order.started) orders.add(tk.order);
+    return orders;
+  }
+
   // ---- cooks and queue ----------------------------------------------------
+
+  private newTicket(order: Order, hedge: boolean, service: Rng, stalls: Rng): Ticket {
+    return {
+      id: this.nextTicketId++,
+      order,
+      enqueuedAt: this.now,
+      hedge,
+      baseMs: this.drawService(service),
+      stallMs: this.drawStall(stalls),
+    };
+  }
 
   private dispatch(): void {
     if (this.globalStall) return;
     for (const cook of this.cooks) {
-      if (this.queue.length === 0) return;
+      if (this.queue.length === 0 && this.hedgeQueue.length === 0) return;
       if (cook.ticket) continue;
-      const ticket = this.ctl.queueOrder === 'lifo' ? this.queue.pop()! : this.queue.shift()!;
+      const ticket =
+        this.hedgeQueue.shift() ?? (this.ctl.queueOrder === 'lifo' ? this.queue.pop()! : this.queue.shift()!);
       this.start(cook, ticket);
     }
   }
@@ -316,13 +400,16 @@ class Engine implements Sim {
     this.totals.waitSumMs += this.now - ticket.enqueuedAt;
     this.totals.waitCount++;
     const scope = this.workload.stalls?.scope;
-    const stallMs = scope === 'request' || (scope === 'cook' && cook.id === 0) ? order.stallMs : 0;
-    if (order.firstCostMs < 0) order.firstCostMs = order.baseMs + stallMs;
+    const stallMs = scope === 'request' || (scope === 'cook' && cook.id === 0) ? ticket.stallMs : 0;
     cook.ticket = ticket;
     cook.startedAt = this.now;
     cook.stallMs = stallMs;
     cook.pausedMs = 0;
-    this.scheduleDone(cook, this.now + order.baseMs + stallMs);
+    this.scheduleDone(cook, this.now + ticket.baseMs + stallMs);
+    if (!order.started) {
+      order.started = true;
+      this.armHedge(order);
+    }
   }
 
   private scheduleDone(cook: Cook, at: number): void {
@@ -352,7 +439,8 @@ class Engine implements Sim {
       // The work done so far is spent; the ticket goes back to be served next.
       ticket.order.workMs += this.activeMs(cook);
       ticket.enqueuedAt = this.now;
-      if (this.ctl.queueOrder === 'lifo') this.queue.push(ticket);
+      if (ticket.hedge) this.hedgeQueue.unshift(ticket);
+      else if (this.ctl.queueOrder === 'lifo') this.queue.push(ticket);
       else this.queue.unshift(ticket);
     }
   }
@@ -396,17 +484,17 @@ class Engine implements Sim {
 
   // ---- draws --------------------------------------------------------------
 
-  private drawService(): number {
+  private drawService(rng: Rng): number {
     const s = this.workload.service;
-    if (s.dist === 'exponential') return exponential(this.rng.service, s.mean);
-    return lognormal(this.rng.service, s.median, s.sigma);
+    if (s.dist === 'exponential') return exponential(rng, s.mean);
+    return lognormal(rng, s.median, s.sigma);
   }
 
-  /** Draws a stall for every order (two draws) so the stream stays aligned. */
-  private drawStall(): number {
+  /** Draws a stall for every ticket (two draws) so the stream stays aligned. */
+  private drawStall(rng: Rng): number {
     const cfg = this.workload.stalls;
-    const u = this.rng.stalls.next();
-    const size = this.rng.stalls.next();
+    const u = rng.next();
+    const size = rng.next();
     if (!cfg || cfg.scope === 'global' || u >= cfg.p) return 0;
     return cfg.minMs + (cfg.maxMs - cfg.minMs) * size;
   }
@@ -414,14 +502,15 @@ class Engine implements Sim {
   // ---- bookkeeping --------------------------------------------------------
 
   private push(t: number, kind: EventKind, token = 0, cookId = -1): void {
-    this.heap.push({ t, seq: this.seq++, kind, token, cookId });
+    this.heap.push({ t, seq: this.seq++, kind, token, cookId, order: null });
   }
 
   /** Integrates time-weighted totals up to t. Call before any state change. */
   private touch(t: number): void {
     const dt = t - this.lastT;
     if (dt <= 0) return;
-    this.totals.queueLenMs += this.queue.length * dt;
+    const queued = this.queue.length + this.hedgeQueue.length;
+    this.totals.queueLenMs += queued * dt;
     this.totals.busyCookMs += this.busyCount() * dt;
     this.totals.capacityCookMs += this.cooks.length * dt;
     this.totals.elapsedMs += dt;
@@ -429,14 +518,20 @@ class Engine implements Sim {
   }
 
   private ticketView(tk: Ticket): TicketView {
-    return { ticketId: tk.id, orderId: tk.order.id, arrivedAt: tk.order.arrivedAt, enqueuedAt: tk.enqueuedAt };
+    return {
+      ticketId: tk.id,
+      orderId: tk.order.id,
+      arrivedAt: tk.order.arrivedAt,
+      enqueuedAt: tk.enqueuedAt,
+      hedge: tk.hedge,
+    };
   }
 
   private cookView(c: Cook): CookView {
     if (!c.ticket) return { id: c.id, ticket: null, stalled: this.globalStall };
     const pausing = this.globalStall ? this.now - c.pauseStartedAt : 0;
     const pausedMs = c.pausedMs + pausing;
-    const base = c.ticket.order.baseMs;
+    const base = c.ticket.baseMs;
     return {
       id: c.id,
       ticket: { ...this.ticketView(c.ticket), startedAt: c.startedAt, baseMs: base, stallMs: c.stallMs, pausedMs },
