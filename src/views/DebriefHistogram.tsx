@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { HISTOGRAM_BINS, histogramEdges } from '../sim';
 import { fit, logPos, roundRect, tickLabel } from './canvas';
+import { THEME_EVENT } from '../game/theme';
 import { readTheme } from './theme';
 
 const EDGES = histogramEdges();
@@ -80,9 +81,11 @@ export function DebriefHistogram({ before, after, slo, label }: Props) {
     ro.observe(canvas);
     const mq = matchMedia('(prefers-color-scheme: dark)');
     mq.addEventListener('change', draw);
+    window.addEventListener(THEME_EVENT, draw);
     return () => {
       ro.disconnect();
       mq.removeEventListener('change', draw);
+      window.removeEventListener(THEME_EVENT, draw);
     };
   }, [before, after, slo]);
 

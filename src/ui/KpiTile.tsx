@@ -16,6 +16,7 @@ export function KpiTile({ name, value, caption, spark, swatch, breach, limit }: 
     <div className={breach ? 'kpi breach' : 'kpi'}>
       <div className="k">
         {name}
+        {breach && <span className="tag fail">FAIL</span>}
         {swatch && <i style={{ background: swatch }} />}
       </div>
       <div className="v">{value}</div>

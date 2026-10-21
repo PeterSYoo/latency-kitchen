@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { game } from './game/loop';
 import { isUnlocked } from './game/progress';
 import { navigate, useRoute } from './game/route';
@@ -34,9 +34,21 @@ export function App() {
     return () => game.stop();
   }, [route.screen, level, allowed, hasDebrief]);
 
+  // On each screen change: a page title that says where you are, the top of
+  // the page, and focus on the new screen so screen readers start there.
+  const first = useRef(true);
   useEffect(() => {
+    document.title =
+      route.screen === 'map' || !level
+        ? 'Latency Kitchen'
+        : `${route.screen === 'debrief' ? 'Debrief · ' : ''}Level ${level.number} · ${level.title} · Latency Kitchen`;
     window.scrollTo(0, 0);
-  }, [route.screen]);
+    if (first.current) {
+      first.current = false;
+      return;
+    }
+    requestAnimationFrame(() => document.getElementById('main')?.focus({ preventScroll: true }));
+  }, [route.screen, level]);
 
   if (route.screen === 'map') return <LevelMap />;
   if (!level || !allowed || current?.id !== level.id) return null;

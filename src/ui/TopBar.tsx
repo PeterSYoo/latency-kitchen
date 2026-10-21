@@ -1,6 +1,7 @@
 import { game } from '../game/loop';
 import { href } from '../game/route';
 import { useGame, type Speed } from '../game/store';
+import { ThemeButton } from './ThemeButton';
 
 const SPEEDS: Speed[] = [1, 5, 20];
 
@@ -52,6 +53,7 @@ export function TopBar() {
         <button type="button" className="btn" onClick={() => game.reset()}>
           Reset
         </button>
+        <ThemeButton />
       </div>
     </header>
   );

@@ -3,13 +3,14 @@ import { href } from '../game/route';
 import { useGame } from '../game/store';
 import { LEVELS } from '../levels';
 import { StarRow } from './StarRow';
+import { ThemeButton } from './ThemeButton';
 
 export function LevelMap() {
   const progress = useGame((s) => s.progress);
   const total = LEVELS.reduce((n, l) => n + (progress[l.id]?.stars.filter(Boolean).length ?? 0), 0);
 
   return (
-    <div className="wrap">
+    <main className="wrap" id="main" tabIndex={-1}>
       <header className="topbar">
         <div className="brand">
           <h1>
@@ -18,9 +19,12 @@ export function LevelMap() {
           </h1>
           <span className="crumb">/ Levels</span>
         </div>
-        <span className="pill">
-          {total} of {LEVELS.length * 3} stars
-        </span>
+        <div className="bar-right">
+          <span className="pill">
+            {total} of {LEVELS.length * 3} stars
+          </span>
+          <ThemeButton />
+        </div>
       </header>
       <p className="lede">
         Orders are requests, cooks are workers and the ticket rail is the queue. Each level sets a latency target and
@@ -55,6 +59,6 @@ export function LevelMap() {
           );
         })}
       </ol>
-    </div>
+    </main>
   );
 }
