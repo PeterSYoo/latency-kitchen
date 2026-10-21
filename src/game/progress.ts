@@ -28,12 +28,32 @@ export function saveProgress(p: Progress): void {
   }
 }
 
-/** Merges newly earned stars in; stars are never taken away. */
+/**
+ * Merges newly earned stars in; stars are never taken away. Returns `p`
+ * itself when nothing new was earned, so callers can skip saving.
+ */
 export function recordStars(p: Progress, levelId: string, stars: Stars): Progress {
   const old = p[levelId]?.stars ?? [false, false, false];
-  const merged = old.map((s, i) => s || stars[i]) as Stars;
-  if (merged.every((s, i) => s === old[i]) && p[levelId]) return p;
-  return { ...p, [levelId]: { stars: merged } };
+  if (!stars.some((s, i) => s && !old[i])) return p;
+  return { ...p, [levelId]: { stars: old.map((s, i) => s || stars[i]) as Stars } };
+}
+
+/** Union of two progress records, star by star. */
+export function mergeProgress(a: Progress, b: Progress): Progress {
+  let out = a;
+  for (const [id, entry] of Object.entries(b)) out = recordStars(out, id, entry.stars);
+  return out;
+}
+
+/**
+ * Saves new stars on top of whatever is stored now, so another tab's progress
+ * is never overwritten by this tab's older copy. Returns what was saved.
+ */
+export function saveNewStars(p: Progress, levelId: string, stars: Stars): Progress | null {
+  if (recordStars(p, levelId, stars) === p) return null;
+  const merged = recordStars(mergeProgress(loadProgress(), p), levelId, stars);
+  saveProgress(merged);
+  return merged;
 }
 
 export function starCount(p: Progress, levelId: string): number {

@@ -6,7 +6,7 @@ import type { Controls } from '../sim';
 import type { LevelConfig } from '../levels/types';
 import { readTheme, type Theme } from '../views/theme';
 import { pickInsight } from './insights';
-import { recordStars, saveProgress } from './progress';
+import { saveNewStars } from './progress';
 import { FIRST_SEED, SAMPLE_MS, Session } from './session';
 import { useGame, type Speed } from './store';
 
@@ -26,10 +26,9 @@ function publish(): void {
   if (!session) return;
   const controls = session.controls();
   const { progress } = useGame.getState();
-  const next = recordStars(progress, session.level.id, session.stars);
-  if (next !== progress) saveProgress(next);
+  const saved = saveNewStars(progress, session.level.id, session.stars);
   useGame.setState({
-    progress: next,
+    progress: saved ?? progress,
     controls,
     view: {
       t: session.now,

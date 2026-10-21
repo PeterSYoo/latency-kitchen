@@ -31,6 +31,22 @@ test('locked levels send you back to the map', async ({ page }) => {
   await expect(page.getByText('Clear level 2 to unlock')).toBeVisible();
 });
 
+test('playing never overwrites progress saved by another tab', async ({ page, context }) => {
+  await page.goto('./#/level/1');
+  await expect(page.getByRole('status')).toBeVisible();
+  // Another tab clears levels 1 and 2 while this one is playing.
+  const other = await context.newPage();
+  await other.goto('./');
+  await other.evaluate((key) => {
+    localStorage.setItem(key, JSON.stringify({ 'level-01': { stars: [true, false, false] }, 'level-02': { stars: [true, false, false] } }));
+  }, 'latency-kitchen:progress:v1');
+  await page.waitForTimeout(500);
+  await page.goto('./#/level/3');
+  await expect(page.getByText('Level 3 · Who goes first')).toBeVisible();
+  await page.reload();
+  await expect(page.getByText('Level 3 · Who goes first')).toBeVisible();
+});
+
 test('progress survives a reload', async ({ page }) => {
   await unlockThrough(page, 3);
   await page.goto('./');

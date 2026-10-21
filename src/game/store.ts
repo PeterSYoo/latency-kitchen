@@ -5,7 +5,7 @@ import { create } from 'zustand';
 import type { Controls, Metrics } from '../sim';
 import type { Insight, LevelConfig } from '../levels/types';
 import type { GoalResult } from './goals';
-import { loadProgress, type Progress } from './progress';
+import { loadProgress, mergeProgress, type Progress } from './progress';
 import type { Stars, Status } from './session';
 
 export type Speed = 1 | 5 | 20;
@@ -41,3 +41,12 @@ export const useGame = create<GameState>(() => ({
   view: null,
   progress: loadProgress(),
 }));
+
+// Progress earned in another tab shows up here too.
+if (typeof window !== 'undefined') {
+  window.addEventListener('storage', (e) => {
+    if (e.key === null || e.key.startsWith('latency-kitchen:progress')) {
+      useGame.setState((s) => ({ progress: mergeProgress(s.progress, loadProgress()) }));
+    }
+  });
+}
