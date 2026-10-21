@@ -22,6 +22,7 @@ export interface Sample {
   p50: number;
   p95: number;
   p99: number;
+  p999: number;
   utilization: number;
   errorRate: number;
 }
@@ -142,6 +143,8 @@ export class Session {
             ? 'Over cook budget'
             : m === 'amplification'
               ? 'Wasting work'
+              : m === 'score'
+                ? 'Score below target'
               : `${m === 'p999' ? 'p99.9' : m} breaching SLO`;
     return { kind: 'failing', text };
   }
@@ -164,6 +167,7 @@ export class Session {
       p50: m.p50,
       p95: m.p95,
       p99: m.p99,
+      p999: m.p999,
       utilization: m.utilization,
       errorRate: m.errorRate,
     });

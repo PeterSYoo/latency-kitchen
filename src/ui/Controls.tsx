@@ -58,6 +58,36 @@ export function Controls() {
           </Ctl>
         )}
 
+        {unlocked.has('quorum') && level.workload.fanOut && (
+          <Ctl help="Serve a table once this many of its dishes are ready. Dishes still cooking are thrown away.">
+            <div className="row">
+              <span className="lbl" id="quorum-lbl">
+                Dishes needed (of {level.workload.fanOut.k})
+              </span>
+              <Stepper
+                labelledBy="quorum-lbl"
+                value={c.quorum ?? level.workload.fanOut.k}
+                min={Math.ceil(level.workload.fanOut.k / 2)}
+                max={level.workload.fanOut.k}
+                less="Fewer dishes"
+                more="More dishes"
+                onChange={(quorum) => set({ quorum })}
+              />
+            </div>
+          </Ctl>
+        )}
+
+        {unlocked.has('staggerPauses') && (
+          <Ctl help="Cooks stop for cleaning at different times instead of all at once.">
+            <Toggle
+              id="stagger-on"
+              label="Stagger pauses"
+              checked={c.staggerPauses}
+              onChange={(staggerPauses) => set({ staggerPauses })}
+            />
+          </Ctl>
+        )}
+
         {unlocked.has('hedge') && (
           <Ctl help="If an order isn't done this long after it arrived, a second cook starts a copy.">
             <Toggle id="hedge-on" label="Hedge slow orders" checked={c.hedge} onChange={(hedge) => set({ hedge })} />

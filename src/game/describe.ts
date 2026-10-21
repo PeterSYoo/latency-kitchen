@@ -9,6 +9,8 @@ const NAMES: Record<ControlKey, string> = {
   shed: 'Shedding',
   cache: 'Prep (cache)',
   timeout: 'Timeouts',
+  quorum: 'Serve when ready',
+  staggerPauses: 'Pauses',
 };
 
 export function describeControl(key: ControlKey, c: Controls, level: LevelConfig): string {
@@ -25,6 +27,12 @@ export function describeControl(key: ControlKey, c: Controls, level: LevelConfig
       return c.shed ? `past ${c.shedMax} waiting` : 'off';
     case 'cache':
       return c.cache ? 'on' : 'off';
+    case 'quorum': {
+      const k = level.workload.fanOut?.k ?? 1;
+      return `${c.quorum ?? k} of ${k} dishes`;
+    }
+    case 'staggerPauses':
+      return c.staggerPauses ? 'staggered' : 'all at once';
     case 'timeout':
       if (!c.timeout) return 'off';
       return [

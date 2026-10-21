@@ -2,7 +2,7 @@
 // advances by popping events from a min-heap.
 
 import { EventHeap } from './heap';
-import { OutcomeWindow } from './metrics';
+import { OutcomeWindow, percentile } from './metrics';
 import { exponential, lognormal, stream, uniform, type Rng } from './rng';
 import type {
   Burst,
@@ -19,18 +19,34 @@ import type {
 const METRICS_TICK_MS = 1000;
 const DEFAULT_WINDOW = 1500;
 const DEFAULT_GLOBAL_STALL_EVERY_MS = 5000;
+/** Leaf latencies kept for the fan-out stats. */
+const LEAF_WINDOW = 5000;
+/** Spreads staggered pauses evenly for any number of cooks. */
+const GOLDEN = 0.6180339887498949;
+
+interface Draw {
+  baseMs: number;
+  stallMs: number;
+}
 
 interface Order {
   id: number;
   arrivedAt: number;
-  /** Cooking time and stall drawn at arrival for the first attempt. */
-  baseMs: number;
-  stallMs: number;
+  /** Dishes per order: 1, or K when the workload fans out. */
+  leaves: number;
+  /** Cooking time and stall for each leaf of the first attempt, drawn at arrival. */
+  draws: Draw[];
   /** Cook-ms spent on this order so far, every ticket included. */
   workMs: number;
   state: 'open' | 'ok' | 'failed';
   /** The attempt the customer is waiting on: 0 first, then retries. */
   attempt: number;
+  /** When the current attempt was sent; the customer's patience runs from here. */
+  sentAt: number;
+  /** Leaves of the current attempt that have finished, and the useful work they took. */
+  leafDone: boolean[];
+  doneCount: number;
+  usefulMs: number;
   started: boolean;
   hedged: boolean;
   hedgeToken: number;
@@ -41,6 +57,7 @@ interface Ticket {
   id: number;
   order: Order;
   attempt: number;
+  leaf: number;
   enqueuedAt: number;
   hedge: boolean;
   /** Cooking time before any stall. */
@@ -56,7 +73,9 @@ interface Cook {
   /** Stall applied to the current ticket. */
   stallMs: number;
   doneAt: number;
-  /** Active time left, captured when a global pause starts. */
+  /** Frozen by a stop-the-world pause. A paused cook keeps its ticket and takes no new one. */
+  paused: boolean;
+  /** Active time left, captured when a pause starts. */
   remainingMs: number;
   pausedMs: number;
   pauseStartedAt: number;
@@ -81,7 +100,7 @@ interface SimEvent {
   kind: EventKind;
   /** Lazy cancellation: an event whose token no longer matches its owner is skipped. */
   token: number;
-  /** Cook id for serviceDone, burst index for rateChange. */
+  /** Cook id for serviceDone and staggered pauses (-1 = every cook), burst index for rateChange. */
   index: number;
   order: Order | null;
 }
@@ -99,6 +118,7 @@ export const DEFAULT_CONTROLS: Controls = {
   maxRetries: 2,
   backoffMs: 0,
   cancel: false,
+  staggerPauses: false,
 };
 
 export function createSim(config: SimConfig, initial: Controls, seed: number): Sim {
@@ -127,7 +147,10 @@ class Engine implements Sim {
   /** Hedge copies wait here and go before the normal queue. */
   private hedgeQueue: Ticket[] = [];
   private cooks: Cook[] = [];
-  private globalStall = false;
+  /** Every cook is frozen together (synchronised stop-the-world pauses). */
+  private globalPause = false;
+  /** Bumped when the pause pattern changes, so old pause events are ignored. */
+  private pauseEpoch = 0;
   private nextOrderId = 1;
   private nextTicketId = 1;
 
@@ -139,6 +162,9 @@ class Engine implements Sim {
   private arrivalToken = 0;
 
   private readonly outcomes: OutcomeWindow;
+  private readonly leafLatency = new Float64Array(LEAF_WINDOW);
+  private leafHead = 0;
+  private leafFilled = 0;
   private readonly totals: Totals = {
     arrived: 0,
     completed: 0,
@@ -160,6 +186,8 @@ class Engine implements Sim {
   private tick = { busy: 0, capacity: 0, arrived: 0, hits: 0 };
   private perSecond = { utilization: 0, arrivalRate: 0, cacheHitRate: 0 };
   private ticked = false;
+  /** False while the constructor sets up, before pause schedules exist. */
+  private ready = false;
 
   constructor(config: SimConfig, initial: Controls, seed: number) {
     this.workload = config.workload;
@@ -183,11 +211,9 @@ class Engine implements Sim {
     this.scheduleArrival();
 
     (this.workload.bursts ?? []).forEach((b, i) => this.scheduleBurstBoundary(b, i));
-    const stalls = this.workload.stalls;
-    if (stalls?.scope === 'global') {
-      this.push(stalls.everyMs ?? DEFAULT_GLOBAL_STALL_EVERY_MS, 'stallStart');
-    }
+    this.schedulePauses();
     this.push(METRICS_TICK_MS, 'metricsTick');
+    this.ready = true;
   }
 
   // ---- public API ---------------------------------------------------------
@@ -224,6 +250,14 @@ class Engine implements Sim {
       for (const order of this.ordersInFlight()) this.armTimeout(order);
     }
     if (this.ctl.cancel && !prev.cancel) this.cancelAbandoned();
+    if (this.ctl.staggerPauses !== prev.staggerPauses) {
+      for (const c of this.cooks) this.resumeCook(c);
+      this.globalPause = false;
+      this.schedulePauses();
+    }
+    if ('quorum' in patch && patch.quorum !== prev.quorum) {
+      for (const order of this.ordersInFlight()) if (order.doneCount >= this.needed(order)) this.succeed(order);
+    }
     this.dispatch();
   }
 
@@ -236,7 +270,7 @@ class Engine implements Sim {
       t: this.now,
       queue: [...this.hedgeQueue, ...this.queue].map((tk) => this.ticketView(tk)),
       cooks: this.cooks.map((c) => this.cookView(c)),
-      globalStall: this.globalStall,
+      globalStall: this.globalPause,
     };
   }
 
@@ -250,10 +284,13 @@ class Engine implements Sim {
           arrivalRate: t.elapsedMs > 0 ? (t.arrived / t.elapsedMs) * 1000 : 0,
           cacheHitRate: t.arrived > 0 ? t.cacheHits / t.arrived : 0,
         };
+    const leaves = this.leafLatency.slice(0, this.leafFilled).sort();
     return {
       t: this.now,
       ...s,
       ...ps,
+      leafP50: percentile(leaves, 0.5),
+      leafP99: percentile(leaves, 0.99),
       queueLength: this.queue.length + this.hedgeQueue.length,
       busyCooks: this.busyCount(),
       cooks: this.cooks.length,
@@ -274,7 +311,7 @@ class Engine implements Sim {
         break;
       }
       case 'cacheDone':
-        this.succeed(e.order!, 0);
+        this.succeed(e.order!);
         break;
       case 'hedgeTimer':
         if (e.order!.hedgeToken === e.token) this.onHedgeTimer(e.order!);
@@ -286,10 +323,10 @@ class Engine implements Sim {
         this.onRetry(e.order!);
         break;
       case 'stallStart':
-        this.onStallStart();
+        if (e.token === this.pauseEpoch) this.onPauseStart(e.index);
         break;
       case 'stallEnd':
-        this.onStallEnd();
+        if (e.token === this.pauseEpoch) this.onPauseEnd(e.index);
         break;
       case 'rateChange':
         this.rateChanged();
@@ -305,14 +342,23 @@ class Engine implements Sim {
     this.totals.arrived++;
     // Every order makes the same draws, hit or miss, so the cache toggle
     // doesn't reshuffle service times for later orders.
+    const leaves = this.workload.fanOut?.k ?? 1;
+    const draws: Draw[] = [];
+    for (let i = 0; i < leaves; i++) {
+      draws.push({ baseMs: this.drawService(this.rng.service), stallMs: this.drawStall(this.rng.stalls) });
+    }
     const order: Order = {
       id: this.nextOrderId++,
       arrivedAt: this.now,
-      baseMs: this.drawService(this.rng.service),
-      stallMs: this.drawStall(this.rng.stalls),
+      leaves,
+      draws,
       workMs: 0,
       state: 'open',
       attempt: 0,
+      sentAt: this.now,
+      leafDone: new Array<boolean>(leaves).fill(false),
+      doneCount: 0,
+      usefulMs: 0,
       started: false,
       hedged: false,
       hedgeToken: 0,
@@ -324,7 +370,7 @@ class Engine implements Sim {
       this.totals.cacheHits++;
       this.pushOrder(this.now + cache.hitMs, 'cacheDone', order);
     } else {
-      this.submit(order, { baseMs: order.baseMs, stallMs: order.stallMs });
+      this.submit(order, draws);
     }
 
     this.arrivalRemaining = exponential(this.rng.arrivals, 1);
@@ -338,9 +384,16 @@ class Engine implements Sim {
     const activeMs = this.activeMs(cook);
     cook.ticket = null;
     this.totals.workMs += activeMs;
-    if (order.state === 'open' && ticket.attempt === order.attempt) {
+    if (order.state === 'open' && ticket.attempt === order.attempt && !order.leafDone[ticket.leaf]) {
       order.workMs += activeMs;
-      this.succeed(order, activeMs);
+      order.usefulMs += activeMs;
+      order.leafDone[ticket.leaf] = true;
+      order.doneCount++;
+      if (order.leaves > 1) this.recordLeaf(this.now - order.sentAt);
+      // The leaf's hedge twin stops at once.
+      const { attempt, leaf } = ticket;
+      this.cancelTickets((tk) => tk.order === order && tk.attempt === attempt && tk.leaf === leaf);
+      if (order.doneCount >= this.needed(order)) this.succeed(order);
     } else {
       this.chargeWaste(order, activeMs);
     }
@@ -355,8 +408,12 @@ class Engine implements Sim {
       return;
     }
     order.hedged = true;
-    this.totals.hedges++;
-    this.hedgeQueue.push(this.newTicket(order, true, this.drawTicket(this.rng.hedge)));
+    // Copy every leaf still missing.
+    for (let leaf = 0; leaf < order.leaves; leaf++) {
+      if (order.leafDone[leaf]) continue;
+      this.totals.hedges++;
+      this.hedgeQueue.push(this.newTicket(order, leaf, true, this.drawTicket(this.rng.hedge)));
+    }
     this.dispatch();
   }
 
@@ -377,35 +434,9 @@ class Engine implements Sim {
   private onRetry(order: Order): void {
     if (order.state !== 'open') return;
     this.totals.retries++;
-    this.submit(order, this.drawTicket(this.rng.retry));
-  }
-
-  private onStallStart(): void {
-    const cfg = this.workload.stalls!;
-    // Always draw both so the stream stays aligned whether or not a pause happens.
-    const happens = this.rng.globalStalls.next() < cfg.p;
-    const duration = uniform(this.rng.globalStalls, cfg.minMs, cfg.maxMs);
-    if (happens && !this.globalStall) {
-      this.globalStall = true;
-      for (const c of this.cooks) {
-        if (!c.ticket) continue;
-        c.remainingMs = c.doneAt - this.now;
-        c.pauseStartedAt = this.now;
-        c.token++;
-      }
-      this.push(this.now + duration, 'stallEnd');
-    }
-    this.push(this.now + (cfg.everyMs ?? DEFAULT_GLOBAL_STALL_EVERY_MS), 'stallStart');
-  }
-
-  private onStallEnd(): void {
-    this.globalStall = false;
-    for (const c of this.cooks) {
-      if (!c.ticket) continue;
-      c.pausedMs += this.now - c.pauseStartedAt;
-      this.scheduleDone(c, this.now + c.remainingMs);
-    }
-    this.dispatch();
+    const draws: Draw[] = [];
+    for (let i = 0; i < order.leaves; i++) draws.push(this.drawTicket(this.rng.retry));
+    this.submit(order, draws);
   }
 
   private onMetricsTick(): void {
@@ -422,32 +453,120 @@ class Engine implements Sim {
     this.push(this.now + METRICS_TICK_MS, 'metricsTick');
   }
 
+  // ---- stop-the-world pauses ----------------------------------------------
+
+  private pauseEvery(): number {
+    return this.workload.stalls?.everyMs ?? DEFAULT_GLOBAL_STALL_EVERY_MS;
+  }
+
+  /** Synchronised: one schedule for every cook. Staggered: each cook on its own offset. */
+  private schedulePauses(): void {
+    if (this.workload.stalls?.scope !== 'global') return;
+    this.pauseEpoch++;
+    if (!this.ctl.staggerPauses) {
+      const every = this.pauseEvery();
+      const next = (Math.floor(this.now / every) + 1) * every;
+      this.push(next, 'stallStart', this.pauseEpoch, -1);
+    } else {
+      for (const c of this.cooks) this.scheduleCookPause(c.id);
+    }
+  }
+
+  private scheduleCookPause(id: number): void {
+    const every = this.pauseEvery();
+    const offset = (((id + 1) * GOLDEN) % 1) * every;
+    const base = Math.floor((this.now - offset) / every) * every + offset;
+    const next = base > this.now ? base : base + every;
+    this.push(next, 'stallStart', this.pauseEpoch, id);
+  }
+
+  private onPauseStart(index: number): void {
+    const cfg = this.workload.stalls!;
+    // Always draw both so the stream stays aligned whether or not a pause happens.
+    const happens = this.rng.globalStalls.next() < cfg.p;
+    const duration = uniform(this.rng.globalStalls, cfg.minMs, cfg.maxMs);
+    if (index < 0) {
+      if (happens && !this.globalPause) {
+        this.globalPause = true;
+        for (const c of this.cooks) this.pauseCook(c);
+        this.push(this.now + duration, 'stallEnd', this.pauseEpoch, -1);
+      }
+      this.push(this.now + this.pauseEvery(), 'stallStart', this.pauseEpoch, -1);
+      return;
+    }
+    const cook = this.cooks[index];
+    if (!cook) return; // removed; its schedule ends here
+    if (happens && !cook.paused) {
+      this.pauseCook(cook);
+      this.push(this.now + duration, 'stallEnd', this.pauseEpoch, index);
+    }
+    this.push(this.now + this.pauseEvery(), 'stallStart', this.pauseEpoch, index);
+  }
+
+  private onPauseEnd(index: number): void {
+    if (index < 0) {
+      this.globalPause = false;
+      for (const c of this.cooks) this.resumeCook(c);
+    } else if (this.cooks[index]) {
+      this.resumeCook(this.cooks[index]);
+    }
+    this.dispatch();
+  }
+
+  private pauseCook(c: Cook): void {
+    if (c.paused) return;
+    c.paused = true;
+    c.pauseStartedAt = this.now;
+    if (c.ticket) {
+      c.remainingMs = c.doneAt - this.now;
+      c.token++;
+    }
+  }
+
+  private resumeCook(c: Cook): void {
+    if (!c.paused) return;
+    c.paused = false;
+    if (c.ticket) {
+      c.pausedMs += this.now - c.pauseStartedAt;
+      this.scheduleDone(c, this.now + c.remainingMs);
+    }
+  }
+
   // ---- order outcomes -----------------------------------------------------
 
+  /** Leaves this order needs before it can be served. */
+  private needed(order: Order): number {
+    return Math.max(1, Math.min(order.leaves, this.ctl.quorum ?? order.leaves));
+  }
+
   /** Sends an attempt to the kitchen, unless shedding turns it away at the door. */
-  private submit(order: Order, draw: { baseMs: number; stallMs: number }): void {
+  private submit(order: Order, draws: Draw[]): void {
     if (this.ctl.shed && this.queue.length >= this.ctl.shedMax) {
       this.fail(order, 'shed');
       return;
     }
-    this.queue.push(this.newTicket(order, false, draw));
+    order.sentAt = this.now;
+    order.leafDone.fill(false);
+    order.doneCount = 0;
+    order.usefulMs = 0;
+    draws.forEach((d, leaf) => this.queue.push(this.newTicket(order, leaf, false, d)));
     this.armTimeout(order);
     this.dispatch();
   }
 
-  private succeed(order: Order, usefulMs: number): void {
-    // The twin of the winning attempt always stops at once; older attempts
-    // only stop if cancellation is on. Cancel while the order is still open so
-    // the work lands on it.
+  private succeed(order: Order): void {
+    // Every other ticket of the winning attempt stops at once (twins and
+    // leaves past the quorum); older attempts only stop if cancellation is on.
+    // Cancel while the order is still open so the work lands on it.
     const won = order.attempt;
     this.cancelTickets((tk) => tk.order === order && (tk.attempt === won || this.ctl.cancel));
     order.state = 'ok';
     const latency = this.now - order.arrivedAt;
     this.totals.completed++;
     this.totals.latencySumMs += latency;
-    // The winning ticket's work is the no-hedge, no-retry baseline; anything
+    // The winning tickets' work is the no-hedge, no-retry baseline; anything
     // else spent on the order is waste.
-    this.outcomes.push({ ok: true, latencyMs: latency, workMs: order.workMs, baseMs: usefulMs });
+    this.outcomes.push({ ok: true, latencyMs: latency, workMs: order.workMs, baseMs: order.usefulMs });
   }
 
   private fail(order: Order, why: 'shed' | 'timeout'): void {
@@ -473,8 +592,7 @@ class Engine implements Sim {
       const order = c.ticket.order;
       c.ticket = null;
       c.token++;
-      if (order.state === 'open') order.workMs += ms;
-      else this.chargeWaste(order, ms);
+      this.chargeWaste(order, ms);
     }
     this.hedgeQueue = this.hedgeQueue.filter((tk) => !match(tk));
     this.queue = this.queue.filter((tk) => !match(tk));
@@ -482,6 +600,12 @@ class Engine implements Sim {
 
   private cancelAbandoned(): void {
     this.cancelTickets((tk) => tk.order.state !== 'open' || tk.attempt < tk.order.attempt);
+  }
+
+  private recordLeaf(ms: number): void {
+    this.leafLatency[this.leafHead] = ms;
+    this.leafHead = (this.leafHead + 1) % LEAF_WINDOW;
+    if (this.leafFilled < LEAF_WINDOW) this.leafFilled++;
   }
 
   // ---- hedging and timeouts -----------------------------------------------
@@ -498,20 +622,7 @@ class Engine implements Sim {
   private armTimeout(order: Order): void {
     if (!this.ctl.timeout || order.state !== 'open') return;
     order.timeoutToken++;
-    const sent = this.attemptSentAt(order);
-    this.pushOrder(Math.max(this.now, sent + this.ctl.timeoutMs), 'timeout', order, order.timeoutToken);
-  }
-
-  private attemptSentAt(order: Order): number {
-    let sent = this.now;
-    for (const tk of [...this.queue, ...this.hedgeQueue]) {
-      if (tk.order === order && tk.attempt === order.attempt && !tk.hedge) sent = Math.min(sent, tk.enqueuedAt);
-    }
-    for (const c of this.cooks) {
-      const tk = c.ticket;
-      if (tk && tk.order === order && tk.attempt === order.attempt && !tk.hedge) sent = Math.min(sent, tk.enqueuedAt);
-    }
-    return sent;
+    this.pushOrder(Math.max(this.now, order.sentAt + this.ctl.timeoutMs), 'timeout', order, order.timeoutToken);
   }
 
   private ordersInFlight(): Set<Order> {
@@ -523,11 +634,12 @@ class Engine implements Sim {
 
   // ---- cooks and queue ----------------------------------------------------
 
-  private newTicket(order: Order, hedge: boolean, draw: { baseMs: number; stallMs: number }): Ticket {
+  private newTicket(order: Order, leaf: number, hedge: boolean, draw: Draw): Ticket {
     return {
       id: this.nextTicketId++,
       order,
       attempt: order.attempt,
+      leaf,
       enqueuedAt: this.now,
       hedge,
       baseMs: draw.baseMs,
@@ -536,10 +648,9 @@ class Engine implements Sim {
   }
 
   private dispatch(): void {
-    if (this.globalStall) return;
     for (const cook of this.cooks) {
       if (this.queue.length === 0 && this.hedgeQueue.length === 0) return;
-      if (cook.ticket) continue;
+      if (cook.ticket || cook.paused) continue;
       const ticket =
         this.hedgeQueue.shift() ?? (this.ctl.queueOrder === 'lifo' ? this.queue.pop()! : this.queue.shift()!);
       this.start(cook, ticket);
@@ -571,17 +682,23 @@ class Engine implements Sim {
 
   private resizeCooks(n: number): void {
     while (this.cooks.length < n) {
-      this.cooks.push({
+      const cook: Cook = {
         id: this.cooks.length,
         ticket: null,
         startedAt: 0,
         stallMs: 0,
         doneAt: 0,
+        paused: false,
         remainingMs: 0,
         pausedMs: 0,
         pauseStartedAt: 0,
         token: 0,
-      });
+      };
+      this.cooks.push(cook);
+      if (this.globalPause) this.pauseCook(cook);
+      if (this.ready && this.ctl.staggerPauses && this.workload.stalls?.scope === 'global') {
+        this.scheduleCookPause(cook.id);
+      }
     }
     while (this.cooks.length > n) {
       const cook = this.cooks.pop()!;
@@ -600,7 +717,7 @@ class Engine implements Sim {
 
   /** Time the cook has actually spent cooking its current ticket. */
   private activeMs(cook: Cook): number {
-    const pausing = this.globalStall ? this.now - cook.pauseStartedAt : 0;
+    const pausing = cook.paused ? this.now - cook.pauseStartedAt : 0;
     return this.now - cook.startedAt - cook.pausedMs - pausing;
   }
 
@@ -661,7 +778,7 @@ class Engine implements Sim {
 
   // ---- draws --------------------------------------------------------------
 
-  private drawTicket(rng: Rng): { baseMs: number; stallMs: number } {
+  private drawTicket(rng: Rng): Draw {
     return { baseMs: this.drawService(rng), stallMs: this.drawStall(rng) };
   }
 
@@ -710,19 +827,21 @@ class Engine implements Sim {
       enqueuedAt: tk.enqueuedAt,
       hedge: tk.hedge,
       attempt: tk.attempt,
+      leaf: tk.leaf,
+      leaves: tk.order.leaves,
       abandoned: tk.order.state !== 'open' || tk.attempt < tk.order.attempt,
     };
   }
 
   private cookView(c: Cook): CookView {
-    if (!c.ticket) return { id: c.id, ticket: null, stalled: this.globalStall };
-    const pausing = this.globalStall ? this.now - c.pauseStartedAt : 0;
+    if (!c.ticket) return { id: c.id, ticket: null, stalled: c.paused };
+    const pausing = c.paused ? this.now - c.pauseStartedAt : 0;
     const pausedMs = c.pausedMs + pausing;
     const base = c.ticket.baseMs;
     return {
       id: c.id,
       ticket: { ...this.ticketView(c.ticket), startedAt: c.startedAt, baseMs: base, stallMs: c.stallMs, pausedMs },
-      stalled: this.globalStall || this.activeMs(c) > base,
+      stalled: c.paused || this.activeMs(c) > base,
     };
   }
 }

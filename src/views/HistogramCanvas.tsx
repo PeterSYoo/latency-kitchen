@@ -74,11 +74,12 @@ const draw: DrawFn = (canvas, s, theme) => {
   }
 
   // Percentile markers, labels staggered when they would overlap.
-  const marks = [
+  const marks: [string, number, string][] = [
     ['p50', m.p50, theme.p50],
     ['p95', m.p95, theme.p95],
     ['p99', m.p99, theme.p99],
-  ] as const;
+  ];
+  if (slo?.metric === 'p999') marks.push(['p99.9', m.p999, theme.ink]);
   let prevX = -999;
   let row = 0;
   ctx.font = `500 10.5px ${theme.mono}`;

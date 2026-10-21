@@ -18,7 +18,9 @@ export function KpiRow() {
     <section className="kpis" aria-label="Key metrics">
       <KpiTile name="Mean" value={lat(m.mean)} caption={`last ${m.count.toLocaleString()} orders`} spark="mean" breach={failing('mean')} />
       <KpiTile name="p50" value={lat(m.p50)} caption="median order" spark="p50" swatch="var(--p50)" breach={failing('p50')} />
-      <KpiTile name="p95" value={lat(m.p95)} caption="1 in 20 is slower" spark="p95" swatch="var(--p95)" breach={failing('p95')} />
+      {!goal('p999') && (
+        <KpiTile name="p95" value={lat(m.p95)} caption="1 in 20 is slower" spark="p95" swatch="var(--p95)" breach={failing('p95')} />
+      )}
       <KpiTile
         name="p99"
         value={lat(m.p99)}
@@ -28,6 +30,17 @@ export function KpiRow() {
         breach={failing('p99')}
         limit={p99Goal?.goal.value}
       />
+      {goal('p999') && (
+        <KpiTile
+          name="p99.9"
+          value={lat(m.p999)}
+          caption={`SLO < ${fmtMs(goal('p999')!.goal.value)}`}
+          spark="p999"
+          swatch="var(--ink)"
+          breach={failing('p999')}
+          limit={goal('p999')!.goal.value}
+        />
+      )}
       <KpiTile name="Cooks busy" value={`${Math.round(m.utilization * 100)}%`} caption="utilization, last 1 s" spark="utilization" />
       <KpiTile
         name="Dropped"
