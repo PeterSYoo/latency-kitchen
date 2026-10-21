@@ -6,6 +6,7 @@ import type { Controls } from '../sim';
 import type { LevelConfig } from '../levels/types';
 import { readTheme, type Theme } from '../views/theme';
 import { pickInsight } from './insights';
+import { recordStars, saveProgress } from './progress';
 import { FIRST_SEED, SAMPLE_MS, Session } from './session';
 import { useGame, type Speed } from './store';
 
@@ -24,7 +25,11 @@ const listeners = new Set<FrameListener>();
 function publish(): void {
   if (!session) return;
   const controls = session.controls();
+  const { progress } = useGame.getState();
+  const next = recordStars(progress, session.level.id, session.stars);
+  if (next !== progress) saveProgress(next);
   useGame.setState({
+    progress: next,
     controls,
     view: {
       t: session.now,
@@ -35,6 +40,8 @@ function publish(): void {
       cleared: session.cleared,
       status: session.status(),
       insight: pickInsight(session.level, session.metrics, controls),
+      stars: [...session.stars],
+      nextStar: session.nextStar,
     },
   });
 }
@@ -59,10 +66,17 @@ function frame(now: number): void {
 }
 
 export const game = {
-  start(level: LevelConfig): void {
-    session = new Session(level, seed);
-    useGame.setState({ level });
-    publish();
+  /** Opens a level, keeping the running session if it's the same level. */
+  open(level: LevelConfig): void {
+    if (session?.level.id !== level.id) {
+      session = new Session(level, seed);
+      useGame.setState({ level, paused: false });
+      publish();
+    }
+    this.resume();
+  },
+
+  resume(): void {
     if (!rafId) {
       lastFrame = performance.now();
       rafId = requestAnimationFrame(frame);
@@ -77,7 +91,9 @@ export const game = {
   reset(): void {
     if (!session) return;
     seed++;
-    this.start(session.level);
+    session = new Session(session.level, seed);
+    useGame.setState({ paused: false });
+    publish();
     draw();
   },
 

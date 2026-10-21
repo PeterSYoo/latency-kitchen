@@ -7,7 +7,7 @@ export function KpiRow() {
   const view = useGame((s) => s.view);
   if (!view) return null;
   const m = view.metrics;
-  const has = m.count > 0;
+  const has = m.successes > 0;
   const lat = (v: number) => (has ? fmtMs(v) : '–');
   const goal = (metric: GoalMetric) => view.goals.find((g) => g.goal.metric === metric);
   const failing = (metric: GoalMetric) => goal(metric)?.pass === false;

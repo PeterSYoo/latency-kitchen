@@ -11,6 +11,11 @@ export const LESSONS: { fromLevel: number; tool: string; text: string }[] = [
     text: 'sends a second copy of a slow order to another cook and takes whichever finishes first. Set it near p95 so only the stragglers get copied.',
   },
   {
+    fromLevel: 2,
+    tool: 'Utilization',
+    text: 'is how busy the cooks are. Below about 75% the line stays short; past it, waiting time climbs much faster than the load.',
+  },
+  {
     fromLevel: 3,
     tool: 'LIFO',
     text: 'serves the newest order first. Most orders get faster and a few old ones wait much longer, so the tail gets worse.',
@@ -23,6 +28,16 @@ export const LESSONS: { fromLevel: number; tool: string; text: string }[] = [
   {
     fromLevel: 4,
     tool: 'Prep ahead',
-    text: 'is a cache. Hits are near-instant and free up cooks, which shrinks the queue for everyone else.',
+    text: 'is a cache. Hits are near-instant and free up cooks, but the hit rate falls when new orders flood in.',
+  },
+  {
+    fromLevel: 5,
+    tool: 'Timeouts and retries',
+    text: 'let a customer give up on a slow order and reorder, probably from a different cook.',
+  },
+  {
+    fromLevel: 5,
+    tool: 'Cancellation',
+    text: 'stops work nobody is waiting for. Without it, every retry adds load and a retry storm can take the whole kitchen down.',
   },
 ];

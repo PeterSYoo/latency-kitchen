@@ -22,10 +22,18 @@ export const level01: LevelConfig = {
     { metric: 'errorRate', op: '<', value: 0.01 },
     { metric: 'cooks', op: '<=', value: 3 },
   ],
-  secondStar: {
-    goals: [{ metric: 'cooks', op: '<=', value: 2 }],
-    hint: 'For a second star, clear it with 2 cooks.',
-  },
+  stars: [
+    {
+      goals: [{ metric: 'p99', op: '<', value: 200 }],
+      hint: 'For a second star, hold p99 under 200 ms.',
+      solution: { hedge: true, hedgeMs: 90 },
+    },
+    {
+      goals: [{ metric: 'amplification', op: '<', value: 1.2 }],
+      hint: 'For a third star, waste less: keep amplification under 1.2×.',
+      solution: { hedge: true, hedgeMs: 110 },
+    },
+  ],
   insights: [
     {
       when: ({ m }) => m.p99 < 250,

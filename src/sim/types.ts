@@ -24,6 +24,16 @@ export interface Burst {
   atMs: number;
   durationMs: number;
   multiplier: number;
+  /** Repeat the burst this often, starting at atMs. */
+  everyMs?: number;
+}
+
+export interface CacheConfig {
+  /** Share of orders served from prep when the cache is on. */
+  hitRate: number;
+  hitMs: number;
+  /** Hit rate while a burst is running: burst orders are mostly new, so they miss. */
+  burstHitRate?: number;
 }
 
 export interface Workload {
@@ -32,6 +42,7 @@ export interface Workload {
   bursts?: Burst[];
   service: ServiceDist;
   stalls?: StallConfig;
+  cache?: CacheConfig;
 }
 
 /** The part of a level the engine reads. A full LevelConfig is assignable to it. */
@@ -51,6 +62,19 @@ export interface Controls {
   /** Send a copy of an order still cooking hedgeMs after it arrived. First finisher wins. */
   hedge: boolean;
   hedgeMs: number;
+  /** Reject new orders while this many are already waiting. Rejections are errors. */
+  shed: boolean;
+  shedMax: number;
+  /** Serve workload.cache.hitRate of orders from prep, without a cook. */
+  cache: boolean;
+  /** The customer gives up on an attempt after timeoutMs and retries up to maxRetries times. */
+  timeout: boolean;
+  timeoutMs: number;
+  maxRetries: number;
+  /** Wait before retry n: backoffMs × 2^(n-1). 0 retries at once. */
+  backoffMs: number;
+  /** Stop abandoned attempts. Without it they keep cooking for nobody. */
+  cancel: boolean;
 }
 
 export interface TicketView {
@@ -62,6 +86,10 @@ export interface TicketView {
   enqueuedAt: number;
   /** A hedge copy rather than the original. */
   hedge: boolean;
+  /** 0 for the first attempt, then 1, 2… for retries. */
+  attempt: number;
+  /** The customer has given up on this attempt, or the order is already settled. */
+  abandoned: boolean;
 }
 
 export interface CookView {
@@ -89,9 +117,15 @@ export interface SimSnapshot {
 export interface Totals {
   arrived: number;
   completed: number;
+  /** Orders shed at the door. */
   dropped: number;
-  /** Hedge copies issued. */
+  /** Orders that ran out of retries. */
+  timedOut: number;
   hedges: number;
+  retries: number;
+  cacheHits: number;
+  /** Cook-ms spent cooking, wasted or not. */
+  workMs: number;
   /** Integral of queue length over time (order·ms). */
   queueLenMs: number;
   /** Sum and count of time tickets waited in the queue before a cook took them. */
@@ -110,6 +144,8 @@ export interface Metrics {
   t: number;
   /** Orders in the rolling window. */
   count: number;
+  /** Of those, the ones that succeeded; latency stats cover only these. */
+  successes: number;
   mean: number;
   p50: number;
   p90: number;
@@ -121,6 +157,10 @@ export interface Metrics {
   utilization: number;
   /** Errors (shed, timed out) / orders in the window. */
   errorRate: number;
+  /** Orders per second over the last completed second. */
+  arrivalRate: number;
+  /** Cache hits / arrivals over the last completed second. */
+  cacheHitRate: number;
   /** Cook-ms spent per completed order, over its no-hedge, no-retry cost. */
   amplification: number;
   /** Counts per bin; edges from histogramEdges(). */

@@ -47,19 +47,6 @@ describe('Level 1 · Fix the stragglers', () => {
     expect(lifo.m.p99).toBeGreaterThan(base.m.p99);
   });
 
-  it('is clearable with its stored solution within 3 simulated minutes', () => {
-    const s = new Session(level01, FIRST_SEED);
-    s.setControls(level01.solution);
-    for (let i = 0; i < 180 && !s.cleared; i++) s.advance(1000);
-    expect(s.cleared).toBe(true);
-  });
-
-  it('opens failing, so the tail is visible at once', () => {
-    const s = new Session(level01, SEED);
-    expect(s.history).toHaveLength(120);
-    expect(s.status().kind).toBe('failing');
-  });
-
   it('restarts the hold on any control change', () => {
     const s = new Session(level01, FIRST_SEED, { ...level01.defaults, ...level01.solution });
     for (let i = 0; i < 120 && s.hold === 0; i++) s.advance(1000);

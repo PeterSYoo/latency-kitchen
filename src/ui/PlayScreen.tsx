@@ -69,6 +69,7 @@ export function PlayScreen() {
                 <span><i className="box" style={{ background: 'var(--series)' }} />Cooking</span>
                 <span><i className="box" style={{ background: 'var(--crit)' }} />Stalled</span>
                 {level.unlockedControls.includes('hedge') && <span><i className="box hedge" />Hedge copy</span>}
+                {level.unlockedControls.includes('timeout') && <span><i className="box" style={{ background: 'var(--faint)' }} />Abandoned</span>}
               </div>
             </div>
             <div className="pb">

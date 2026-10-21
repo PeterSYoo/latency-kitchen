@@ -64,14 +64,26 @@ const draw: DrawFn = (canvas, s, theme) => {
     ['p99', theme.p99, 2.25],
   ] as const;
   for (const [key, col, lw] of series) {
+    // Gaps where no order succeeded: there is no latency to plot.
     ctx.beginPath();
-    hist.forEach((p, i) => (i ? ctx.lineTo(X(i + off), Y(p[key])) : ctx.moveTo(X(i + off), Y(p[key]))));
+    let pen = false;
+    hist.forEach((p, i) => {
+      if (!p.hasLatency) {
+        pen = false;
+        return;
+      }
+      if (pen) ctx.lineTo(X(i + off), Y(p[key]));
+      else ctx.moveTo(X(i + off), Y(p[key]));
+      pen = true;
+    });
     ctx.strokeStyle = col;
     ctx.lineWidth = lw;
     ctx.lineJoin = 'round';
     ctx.stroke();
+    const last = hist[hist.length - 1];
+    if (!last.hasLatency) continue;
     ctx.beginPath();
-    ctx.arc(X(HISTORY_SAMPLES - 1), Y(hist[hist.length - 1][key]), 3, 0, Math.PI * 2);
+    ctx.arc(X(HISTORY_SAMPLES - 1), Y(last[key]), 3, 0, Math.PI * 2);
     ctx.fillStyle = col;
     ctx.fill();
   }

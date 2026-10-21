@@ -5,7 +5,8 @@ import { create } from 'zustand';
 import type { Controls, Metrics } from '../sim';
 import type { Insight, LevelConfig } from '../levels/types';
 import type { GoalResult } from './goals';
-import type { Status } from './session';
+import { loadProgress, type Progress } from './progress';
+import type { Stars, Status } from './session';
 
 export type Speed = 1 | 5 | 20;
 
@@ -18,6 +19,9 @@ export interface PlayView {
   cleared: boolean;
   status: Status;
   insight: Insight;
+  stars: Stars;
+  /** The star being worked towards (0 = clearing), or null when all are earned. */
+  nextStar: 0 | 1 | 2 | null;
 }
 
 export interface GameState {
@@ -26,6 +30,7 @@ export interface GameState {
   speed: Speed;
   paused: boolean;
   view: PlayView | null;
+  progress: Progress;
 }
 
 export const useGame = create<GameState>(() => ({
@@ -34,4 +39,5 @@ export const useGame = create<GameState>(() => ({
   speed: 5,
   paused: false,
   view: null,
+  progress: loadProgress(),
 }));
