@@ -24,15 +24,18 @@ const draw: DrawFn = (canvas, s, theme) => {
   ctx.fillText('queue', 0, 14);
   ctx.textAlign = 'right';
   ctx.fillStyle = snap.queue.length > 10 ? theme.crit : theme.ink;
-  ctx.fillText(`${snap.queue.length} waiting`, w, 14);
+  const waiting = `${snap.queue.length} waiting`;
+  ctx.fillText(waiting, w, 14);
   const cw = 7, cg = 3;
-  const maxBars = Math.max(0, Math.floor((w - LABEL_W - 80) / (cw + cg)));
+  // Leave room for the count and a "+N" overflow label.
+  const reserved = ctx.measureText(waiting).width + ctx.measureText(`+${snap.queue.length}`).width + 16;
+  const maxBars = Math.max(0, Math.floor((w - LABEL_W - reserved) / (cw + cg)));
   snap.queue.slice(0, maxBars).forEach((q, i) => {
     const age = now - q.arrivedAt;
     const over = age > slo;
     const x = LABEL_W + i * (cw + cg);
-    ctx.fillStyle = over ? theme.crit : theme.series;
-    ctx.globalAlpha = over ? 1 : 0.35 + 0.65 * Math.min(1, age / slo);
+    ctx.fillStyle = q.abandoned ? theme.faint : over ? theme.crit : theme.series;
+    ctx.globalAlpha = q.abandoned ? 0.5 : over ? 1 : 0.35 + 0.65 * Math.min(1, age / slo);
     roundRect(ctx, x, 5, cw, 18, 2);
     ctx.fill();
     ctx.globalAlpha = 1;
@@ -58,7 +61,9 @@ const draw: DrawFn = (canvas, s, theme) => {
   ctx.stroke();
 
   // Cooks: one row each, like a trace view, elapsed time on a 0–1 s scale.
-  const trackW = w - LABEL_W - 118;
+  const labels = snap.cooks.map((c) => (c.ticket ? ticketLabel(c.ticket) : 'paused'));
+  const rightW = Math.max(108, ...labels.map((l) => ctx.measureText(l).width)) + 10;
+  const trackW = w - LABEL_W - rightW;
   const scale = (ms: number) => (Math.min(SCALE_MS, ms) / SCALE_MS) * trackW;
   snap.cooks.forEach((c, i) => {
     const y = TOP + i * ROW_H;
@@ -89,8 +94,8 @@ const draw: DrawFn = (canvas, s, theme) => {
     }
     const elapsed = now - tk.startedAt;
     roundRect(ctx, LABEL_W, y + 3, Math.max(4, scale(elapsed)), 16, 4);
-    ctx.fillStyle = c.stalled ? theme.crit : theme.series;
-    ctx.globalAlpha = c.stalled ? 0.9 : 0.75;
+    ctx.fillStyle = tk.abandoned ? theme.faint : c.stalled ? theme.crit : theme.series;
+    ctx.globalAlpha = tk.abandoned ? 0.55 : c.stalled ? 0.9 : 0.75;
     ctx.fill();
     ctx.globalAlpha = 1;
     if (tk.hedge) {
@@ -102,8 +107,8 @@ const draw: DrawFn = (canvas, s, theme) => {
       ctx.setLineDash([]);
     }
     ctx.textAlign = 'left';
-    ctx.fillStyle = c.stalled ? theme.crit : theme.ink;
-    ctx.fillText(`#${tk.orderId}${tk.hedge ? ' copy' : ''}`, LABEL_W + trackW + 10, mid - 6);
+    ctx.fillStyle = tk.abandoned ? theme.faint : c.stalled ? theme.crit : theme.ink;
+    ctx.fillText(ticketLabel(tk), LABEL_W + trackW + 10, mid - 6);
     ctx.fillStyle = theme.muted;
     ctx.fillText(`${fmtMs(now - tk.arrivedAt)} total`, LABEL_W + trackW + 10, mid + 7);
   });
@@ -118,6 +123,11 @@ const draw: DrawFn = (canvas, s, theme) => {
   ctx.textAlign = 'right';
   ctx.fillText('1 s', LABEL_W + trackW, ly);
 };
+
+function ticketLabel(tk: { orderId: number; abandoned: boolean; hedge: boolean; attempt: number }): string {
+  const tag = tk.abandoned ? ' abandoned' : tk.hedge ? ' copy' : tk.attempt > 0 ? ` retry ${tk.attempt}` : '';
+  return `#${tk.orderId}${tag}`;
+}
 
 export function WorkersCanvas({ label }: { label: string }) {
   return <LiveCanvas className="chart-workers" draw={draw} label={label} />;

@@ -62,7 +62,16 @@ const draw: DrawFn = (canvas, s, theme) => {
     ctx.stroke();
     ctx.setLineDash([]);
   }
-  if (!m.count) return;
+  if (!m.successes) {
+    if (m.count) {
+      ctx.font = `500 12px ${theme.mono}`;
+      ctx.fillStyle = theme.crit;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(`None of the last ${m.count.toLocaleString()} orders succeeded`, L + pw / 2, T + ph / 2);
+    }
+    return;
+  }
 
   // Percentile markers, labels staggered when they would overlap.
   const marks = [

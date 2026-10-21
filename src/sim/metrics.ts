@@ -61,6 +61,13 @@ export class OutcomeWindow {
     return this.filled;
   }
 
+  /** Charges work that ended after its order was settled to the newest outcome. */
+  addWork(ms: number): void {
+    if (this.filled === 0) return;
+    const i = (this.head - 1 + this.capacity) % this.capacity;
+    this.work[i] += ms;
+  }
+
   push(o: Outcome): void {
     const i = this.head;
     this.ok[i] = o.ok ? 1 : 0;
@@ -91,6 +98,7 @@ export class OutcomeWindow {
     const sorted = lat.subarray(0, okCount).sort();
     return {
       count: n,
+      successes: okCount,
       mean: okCount ? sum / okCount : 0,
       p50: percentile(sorted, 0.5),
       p90: percentile(sorted, 0.9),
@@ -99,7 +107,8 @@ export class OutcomeWindow {
       p999: percentile(sorted, 0.999),
       max: okCount ? sorted[okCount - 1] : 0,
       errorRate: n ? (n - okCount) / n : 0,
-      amplification: base > 0 ? work / base : 1,
+      // All work wasted (every order failed) is unbounded amplification.
+      amplification: base > 0 ? work / base : work > 0 ? Infinity : 1,
       histogram,
     };
   }

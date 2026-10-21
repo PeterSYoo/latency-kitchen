@@ -1,4 +1,5 @@
 import { game } from '../game/loop';
+import { href } from '../game/route';
 import { useGame, type Speed } from '../game/store';
 
 const SPEEDS: Speed[] = [1, 5, 20];
@@ -24,10 +25,10 @@ export function TopBar() {
       <div className="brand">
         <h1>
           <span className="logo" aria-hidden="true" />
-          Latency Kitchen
+          <a href={href({ screen: 'map' })}>Latency Kitchen</a>
         </h1>
         <span className="crumb">
-          / Level {level.number} · {level.title}
+          / <a href={href({ screen: 'map' })}>Levels</a> / Level {level.number} · {level.title}
         </span>
       </div>
       <div className="bar-right">
