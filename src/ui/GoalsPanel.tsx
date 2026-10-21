@@ -47,6 +47,7 @@ export function GoalsPanel() {
             </div>
           </div>
         )}
+        {level.scoreHelp && <p className="note">{level.scoreHelp}</p>}
         <p className="note">
           {!view.cleared
             ? 'Any control change restarts the hold.'

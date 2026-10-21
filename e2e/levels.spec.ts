@@ -17,7 +17,7 @@ async function unlockThrough(page: Page, n: number) {
   );
 }
 
-async function setStepper(page: Page, group: string, target: number, less: string, more: string) {
+async function setStepper(page: Page, group: string | RegExp, target: number, less: string, more: string) {
   const g = page.getByRole('group', { name: group });
   const val = g.locator('.val');
   for (let i = 0; i < 12; i++) {
@@ -33,6 +33,8 @@ async function applySolution(page: Page, level: LevelConfig) {
   const s = { ...level.solution };
   if (s.arrivalRate !== undefined) await page.getByLabel('Orders accepted').fill(String(s.arrivalRate));
   if (s.cooks !== undefined) await setStepper(page, 'Cooks', s.cooks, 'Fewer cooks', 'More cooks');
+  if (s.quorum !== undefined) await setStepper(page, /Dishes needed/, s.quorum, 'Fewer dishes', 'More dishes');
+  if (s.staggerPauses) await page.getByLabel('Stagger pauses').check();
   if (s.hedge) await page.getByLabel('Hedge slow orders').check();
   if (s.hedgeMs !== undefined) await page.getByLabel('Hedge after milliseconds').fill(String(s.hedgeMs));
   if (s.queueOrder) await page.getByRole('button', { name: s.queueOrder.toUpperCase() }).click();

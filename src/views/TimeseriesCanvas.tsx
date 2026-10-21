@@ -58,11 +58,12 @@ const draw: DrawFn = (canvas, s, theme) => {
   const hist = s.history;
   if (hist.length < 2) return;
   const off = HISTORY_SAMPLES - hist.length;
-  const series = [
+  const series: [ 'p50' | 'p95' | 'p99' | 'p999', string, number][] = [
     ['p50', theme.p50, 1.5],
     ['p95', theme.p95, 1.5],
     ['p99', theme.p99, 2.25],
-  ] as const;
+  ];
+  if (slo?.metric === 'p999') series.push(['p999', theme.ink, 1.5]);
   for (const [key, col, lw] of series) {
     // Gaps where no order succeeded: there is no latency to plot.
     ctx.beginPath();

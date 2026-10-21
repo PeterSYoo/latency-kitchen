@@ -40,4 +40,14 @@ export const LESSONS: { fromLevel: number; tool: string; text: string }[] = [
     tool: 'Cancellation',
     text: 'stops work nobody is waiting for. Without it, every retry adds load and a retry storm can take the whole kitchen down.',
   },
+  {
+    fromLevel: 6,
+    tool: 'Quorum',
+    text: 'serves a table before its slowest dish is done. With many parallel dishes, the rare slow one becomes the common case.',
+  },
+  {
+    fromLevel: 7,
+    tool: 'Staggered pauses',
+    text: 'keep some cooks working while others stop, so hedging has somewhere to send the copy.',
+  },
 ];

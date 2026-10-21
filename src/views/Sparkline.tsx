@@ -15,6 +15,7 @@ function colorFor(key: SparkKey, t: Theme): string {
   if (key === 'p50') return t.p50;
   if (key === 'p95') return t.p95;
   if (key === 'p99') return t.p99;
+  if (key === 'p999') return t.ink;
   return t.series;
 }
 

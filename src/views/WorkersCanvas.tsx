@@ -124,9 +124,10 @@ const draw: DrawFn = (canvas, s, theme) => {
   ctx.fillText('1 s', LABEL_W + trackW, ly);
 };
 
-function ticketLabel(tk: { orderId: number; abandoned: boolean; hedge: boolean; attempt: number }): string {
+function ticketLabel(tk: { orderId: number; abandoned: boolean; hedge: boolean; attempt: number; leaf: number; leaves: number }): string {
   const tag = tk.abandoned ? ' abandoned' : tk.hedge ? ' copy' : tk.attempt > 0 ? ` retry ${tk.attempt}` : '';
-  return `#${tk.orderId}${tag}`;
+  const dish = tk.leaves > 1 ? `.${tk.leaf + 1}` : '';
+  return `#${tk.orderId}${dish}${tag}`;
 }
 
 export function WorkersCanvas({ label }: { label: string }) {

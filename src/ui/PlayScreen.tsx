@@ -17,6 +17,7 @@ export function PlayScreen() {
   const view = useGame((s) => s.view);
   const slo = latencySlo(level.goals);
   const sloText = slo ? `SLO ${fmtMs(slo.value)}` : null;
+  const fanOut = level.workload.fanOut;
 
   // Text summaries for the canvases, refreshed once a simulated second.
   const second = view ? Math.floor(view.t / 1000) : 0;
@@ -24,9 +25,9 @@ export function PlayScreen() {
     if (!view) return { ts: '', hist: '', workers: '' };
     const m = view.metrics;
     return {
-      ts: `Latency over the last 60 simulated seconds, log scale. Now p50 ${fmtMs(m.p50)}, p95 ${fmtMs(m.p95)}, p99 ${fmtMs(m.p99)}${sloText ? `, ${sloText}` : ''}.`,
+      ts: `Latency over the last 60 simulated seconds, log scale. Now p50 ${fmtMs(m.p50)}, p95 ${fmtMs(m.p95)}, p99 ${fmtMs(m.p99)}${slo?.metric === 'p999' ? `, p99.9 ${fmtMs(m.p999)}` : ''}${sloText ? `, ${sloText}` : ''}.`,
       hist: `Histogram of the last ${m.count} orders. p50 ${fmtMs(m.p50)}, p99 ${fmtMs(m.p99)}, slowest ${fmtMs(m.max)}.`,
-      workers: `${m.queueLength} orders waiting, ${m.busyCooks} of ${m.cooks} cooks busy.`,
+      workers: `${m.queueLength} ${fanOut ? 'dishes' : 'orders'} waiting, ${m.busyCooks} of ${m.cooks} cooks busy.`,
     };
   }, [second, level]);
 
@@ -44,6 +45,7 @@ export function PlayScreen() {
                 <span><i style={{ background: 'var(--p50)' }} />p50</span>
                 <span><i style={{ background: 'var(--p95)' }} />p95</span>
                 <span><i style={{ background: 'var(--p99)' }} />p99</span>
+                {slo?.metric === 'p999' && <span><i style={{ background: 'var(--ink)' }} />p99.9</span>}
                 {sloText && <span><i className="dash" />{sloText}</span>}
               </div>
             </div>

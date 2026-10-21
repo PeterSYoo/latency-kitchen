@@ -43,6 +43,8 @@ export interface Workload {
   service: ServiceDist;
   stalls?: StallConfig;
   cache?: CacheConfig;
+  /** Each order needs k dishes, each its own ticket; it's served when the quorum is ready. */
+  fanOut?: { k: number };
 }
 
 /** The part of a level the engine reads. A full LevelConfig is assignable to it. */
@@ -75,6 +77,10 @@ export interface Controls {
   backoffMs: number;
   /** Stop abandoned attempts. Without it they keep cooking for nobody. */
   cancel: boolean;
+  /** Fan-out: serve an order once this many of its dishes are ready. Default: all of them. */
+  quorum?: number;
+  /** Stop-the-world pauses hit cooks at different times instead of all at once. */
+  staggerPauses: boolean;
 }
 
 export interface TicketView {
@@ -88,6 +94,9 @@ export interface TicketView {
   hedge: boolean;
   /** 0 for the first attempt, then 1, 2… for retries. */
   attempt: number;
+  /** Which dish of a fanned-out order, 0-based, out of `leaves`. */
+  leaf: number;
+  leaves: number;
   /** The customer has given up on this attempt, or the order is already settled. */
   abandoned: boolean;
 }
@@ -161,6 +170,9 @@ export interface Metrics {
   arrivalRate: number;
   /** Cache hits / arrivals over the last completed second. */
   cacheHitRate: number;
+  /** Fan-out only: latency of single dishes, from send to done, over recent dishes. */
+  leafP50: number;
+  leafP99: number;
   /** Cook-ms spent per completed order, over its no-hedge, no-retry cost. */
   amplification: number;
   /** Counts per bin; edges from histogramEdges(). */

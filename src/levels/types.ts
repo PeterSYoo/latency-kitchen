@@ -11,7 +11,9 @@ export type GoalMetric =
   /** Cooks, plus one slot for the cache when it's on. */
   | 'cooks'
   /** The arrival rate the player has dialled in, orders per second. */
-  | 'arrivalRate';
+  | 'arrivalRate'
+  /** Free play: the level's own score, 0–100. */
+  | 'score';
 
 export interface Goal {
   metric: GoalMetric;
@@ -42,7 +44,22 @@ export interface StarGoal {
   solution: Partial<Controls>;
 }
 
-export type ControlKey = 'cooks' | 'arrivalRate' | 'hedge' | 'queueOrder' | 'shed' | 'cache' | 'timeout';
+export type ControlKey =
+  | 'cooks'
+  | 'arrivalRate'
+  | 'hedge'
+  | 'queueOrder'
+  | 'shed'
+  | 'cache'
+  | 'timeout'
+  | 'quorum'
+  | 'staggerPauses';
+
+/** A free-play score and its parts, each a penalty in points. */
+export interface ScoreBreakdown {
+  score: number;
+  parts: { label: string; points: number }[];
+}
 
 interface Range {
   min: number;
@@ -76,4 +93,7 @@ export interface LevelConfig extends SimConfig {
   insights: InsightRule[];
   solution: Partial<Controls>; // known clearing setup, checked in CI
   debrief: string;
+  /** Free play only: how the 'score' goal metric is computed. */
+  score?: (m: Metrics, c: Controls) => ScoreBreakdown;
+  scoreHelp?: string;
 }
