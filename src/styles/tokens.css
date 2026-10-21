@@ -13,12 +13,14 @@
   --accent: #2f6bd8;
   --series: #4c7fd9;
   --p50: #8a94a3;
-  --p95: #1f8f8a;
-  --p99: #c96a00;
-  --ok: #178a4c;
-  --crit: #d2353a;
-  --crit-tint: rgba(210, 53, 58, 0.07);
-  --ok-tint: rgba(23, 138, 76, 0.1);
+  --p95: #16797a;
+  --p99: #a85800;
+  --ok: #137a43;
+  --crit: #c42b31;
+  --crit-tint: rgba(196, 43, 49, 0.07);
+  --ok-tint: rgba(19, 122, 67, 0.1);
+  /* Text on an accent-coloured button. */
+  --on-accent: #ffffff;
   --font-ui: 'Geist Variable', system-ui, -apple-system, 'Segoe UI', sans-serif;
   --font-mono: 'Geist Mono Variable', ui-monospace, 'SF Mono', Menlo, monospace;
 }
@@ -42,6 +44,7 @@
     --crit: #f0565a;
     --crit-tint: rgba(240, 86, 90, 0.1);
     --ok-tint: rgba(63, 191, 120, 0.12);
+    --on-accent: #0f1216;
   }
 }
 
@@ -63,4 +66,5 @@
   --crit: #f0565a;
   --crit-tint: rgba(240, 86, 90, 0.1);
   --ok-tint: rgba(63, 191, 120, 0.12);
+  --on-accent: #0f1216;
 }

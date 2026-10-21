@@ -18,7 +18,7 @@ export function Controls() {
   const cache = level.workload.cache;
 
   return (
-    <section className="panel" aria-label="Controls">
+    <section className="panel" aria-label="Controls" id="controls" tabIndex={-1}>
       <div className="ph">
         <h2>Controls</h2>
       </div>

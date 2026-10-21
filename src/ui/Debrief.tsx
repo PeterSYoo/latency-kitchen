@@ -20,7 +20,7 @@ export function Debrief() {
   const nextStar = view.nextStar;
 
   return (
-    <div className="wrap debrief">
+    <main className="wrap debrief" id="main" tabIndex={-1}>
       <header className="topbar">
         <div className="brand">
           <h1>
@@ -121,6 +121,6 @@ export function Debrief() {
           All levels
         </a>
       </nav>
-    </div>
+    </main>
   );
 }

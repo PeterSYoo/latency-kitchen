@@ -88,7 +88,7 @@ const draw: DrawFn = (canvas, s, theme) => {
 
     const tk = c.ticket;
     if (!tk) {
-      ctx.fillStyle = c.stalled ? theme.crit : theme.faint;
+      ctx.fillStyle = c.stalled ? theme.crit : theme.muted;
       ctx.fillText(c.stalled ? 'paused' : 'idle', LABEL_W + trackW + 10, mid);
       return;
     }
@@ -107,13 +107,13 @@ const draw: DrawFn = (canvas, s, theme) => {
       ctx.setLineDash([]);
     }
     ctx.textAlign = 'left';
-    ctx.fillStyle = tk.abandoned ? theme.faint : c.stalled ? theme.crit : theme.ink;
+    ctx.fillStyle = tk.abandoned ? theme.muted : c.stalled ? theme.crit : theme.ink;
     ctx.fillText(ticketLabel(tk), LABEL_W + trackW + 10, mid - 6);
     ctx.fillStyle = theme.muted;
     ctx.fillText(`${fmtMs(now - tk.arrivedAt)} total`, LABEL_W + trackW + 10, mid + 7);
   });
 
-  ctx.fillStyle = theme.faint;
+  ctx.fillStyle = theme.muted;
   ctx.font = `400 10px ${theme.mono}`;
   const ly = TOP + snap.cooks.length * ROW_H + 2;
   ctx.textAlign = 'left';

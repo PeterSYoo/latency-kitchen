@@ -32,7 +32,14 @@ export function PlayScreen() {
   }, [second, level]);
 
   return (
-    <div className="wrap">
+    <main className="wrap" id="main" tabIndex={-1}>
+      <button
+        type="button"
+        className="btn skip"
+        onClick={() => document.getElementById('controls')?.focus()}
+      >
+        Skip to controls
+      </button>
       <TopBar />
       <p className="lede">{level.story}</p>
       <KpiRow />
@@ -87,6 +94,6 @@ export function PlayScreen() {
         </div>
       </div>
       <LessonsFooter level={level.number} />
-    </div>
+    </main>
   );
 }
